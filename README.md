@@ -57,6 +57,12 @@ mutation runs, and a path filter naming the code under test.
 ([buildingway-tools](https://github.com/Cellar-Mander/buildingway-tools)); set
 `revert-check: false` if it doesn't.
 
+`Buildingway.Tools` comes from GitHub Packages, which needs a token even for public packages.
+The `revert-check` and `mutation` jobs pass `github.token` for a feed the caller's `nuget.config`
+names `buildingway` (see buildingway-tools' README), so the caller must grant them
+`packages: read` and the package's settings must give the caller's repo Read under
+"Manage Actions access". That grant also lets Dependabot update the tool.
+
 ## release.yml
 
 The caller runs on a pushed `v*` tag and on `workflow_dispatch` with a `channel` choice. It must

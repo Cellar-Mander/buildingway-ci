@@ -52,6 +52,9 @@ jobs:
     name: revert-check
     if: github.event_name == 'pull_request' && inputs.revert-check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read  # Buildingway.Tools from GitHub Packages
 
     steps:
     - name: Checkout
@@ -66,6 +69,10 @@ jobs:
         dotnet-version: ${{ inputs.dotnet-version }}
 
     - name: Restore tools
+      # The caller's nuget.config names the GitHub Packages feed "buildingway"; its package
+      # must grant the caller's repo read access under Manage Actions access
+      env:
+        NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: dotnet tool restore
 
     - name: Revert check

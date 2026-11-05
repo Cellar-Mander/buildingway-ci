@@ -2,7 +2,7 @@ name: Mutation
 
 # Would the tests catch plausible faults? Stryker.NET mutates the code under test and reruns the
 # tests. Informs only: no score threshold, and keep "<job> / mutation" out of required checks.
-# Stryker must be a local tool in the caller's tool manifest (dotnet-tools.json), with its settings
+# Stryker must be a local tool in the caller's tool manifest (.config/dotnet-tools.json), with its settings
 # in the test project's stryker-config.json. On pull requests only mutants in code or tests changed against
 # the base branch are tested; a PR labelled mutation gets a full run instead, e.g. when tests were
 # deleted. Other events (schedule, workflow_dispatch) always get a full run. The caller triggers on
@@ -29,6 +29,9 @@ jobs:
     name: mutation
     if: github.event.action != 'labeled' || github.event.label.name == 'mutation'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read  # Buildingway.Tools from GitHub Packages
 
     steps:
     - name: Checkout
@@ -44,6 +47,10 @@ jobs:
         dotnet-version: ${{ inputs.dotnet-version }}
 
     - name: Restore tools
+      # The caller's nuget.config names the GitHub Packages feed "buildingway"; its package
+      # must grant the caller's repo read access under Manage Actions access
+      env:
+        NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: dotnet tool restore
 
     - name: Mutation test
