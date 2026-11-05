@@ -31,6 +31,9 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read  # Buildingway.Build and other Buildingway.* packages from GitHub Packages
 
     steps:
     - name: Checkout
@@ -43,9 +46,11 @@ jobs:
       with:
         dotnet-version: ${{ inputs.dotnet-version }}
 
+    # Restoring a project that uses the Buildingway.Build SDK reads the caller's "buildingway" feed
     - name: Test
       env:
         TEST_PROJECT: ${{ inputs.test-project }}
+        NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: dotnet test "$TEST_PROJECT" --configuration Release
 
   revert-check:
@@ -54,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read  # Buildingway.Tools from GitHub Packages
+      packages: read  # Buildingway.Tools and Buildingway.Build from GitHub Packages
 
     steps:
     - name: Checkout
@@ -78,6 +83,7 @@ jobs:
     - name: Revert check
       env:
         TEST_PROJECT: ${{ inputs.test-project }}
+        NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: >-
         dotnet buildingway revert-check --ci --test-cmd
         "dotnet build '$TEST_PROJECT' --nologo -v q && dotnet test '$TEST_PROJECT' --nologo --no-build --logger \"trx;LogFileName={trx}\""

@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: read  # Buildingway.Tools from GitHub Packages
+      packages: read  # Buildingway.Tools and Buildingway.Build from GitHub Packages
 
     steps:
     - name: Checkout
@@ -60,6 +60,7 @@ jobs:
           ${{ github.event_name == 'pull_request'
           && !contains(github.event.pull_request.labels.*.name, 'mutation')
           && format('--since:origin/{0}', github.base_ref) || '' }}
+        NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: dotnet stryker ${SINCE:+"$SINCE"} --output "$RUNNER_TEMP/stryker"
 
     - name: Summary
