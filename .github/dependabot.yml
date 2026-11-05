@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Action versions used in the workflows and the install-dalamud action
+  - package-ecosystem: github-actions
+    directories: ["/", "/.github/actions/*"]
+    schedule:
+      interval: weekly
+    # Wait before proposing newly published versions
+    cooldown:
+      default-days: 7

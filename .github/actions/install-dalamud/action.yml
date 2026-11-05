@@ -1,0 +1,40 @@
+name: Install Dalamud
+description: Installs the project's pinned Dalamud build where Dalamud.NET.Sdk finds it on Windows
+
+# The pin lives in the calling project (default .github/dalamud.env, read from the checkout), so
+# its PR builds and releases build against the same Dalamud it was tested with, not whatever
+# latest.zip is when the tag is pushed. The file holds three lines:
+#
+#   DALAMUD_VERSION=15.0.3.9
+#   DALAMUD_COMMIT=<commit in goatcorp/dalamud-distrib that promoted that version>
+#   DALAMUD_SHA256=<SHA-256 of latest.zip at that commit>
+#
+# To move the pin, take the commit that promoted the new version in
+# https://github.com/goatcorp/dalamud-distrib/commits/main/latest.zip and the SHA-256 of its
+# latest.zip; match the Dalamud you test in-game with.
+inputs:
+  pin-file:
+    description: Path of the pin file in the checkout
+    required: false
+    default: .github/dalamud.env
+
+runs:
+  using: composite
+  steps:
+  - name: Install Dalamud
+    shell: pwsh
+    env:
+      PIN_FILE: ${{ inputs.pin-file }}
+    run: |
+      $pin = Get-Content -Raw $env:PIN_FILE | ConvertFrom-StringData
+      foreach ($key in 'DALAMUD_VERSION', 'DALAMUD_COMMIT', 'DALAMUD_SHA256') {
+        if (-not $pin[$key]) { throw "$env:PIN_FILE has no $key" }
+      }
+      if ($pin.DALAMUD_COMMIT -notmatch '^[0-9a-f]{40}$') { throw "DALAMUD_COMMIT in $env:PIN_FILE isn't a full commit SHA" }
+      $dev = Join-Path $env:APPDATA 'XIVLauncher\addon\Hooks\dev'
+      Invoke-WebRequest "https://raw.githubusercontent.com/goatcorp/dalamud-distrib/$($pin.DALAMUD_COMMIT)/latest.zip" -OutFile dalamud.zip
+      if ((Get-FileHash dalamud.zip -Algorithm SHA256).Hash -ne $pin.DALAMUD_SHA256) {
+        throw "dalamud.zip for Dalamud $($pin.DALAMUD_VERSION) doesn't match the pinned SHA-256"
+      }
+      Expand-Archive dalamud.zip -DestinationPath $dev -Force
+      Remove-Item dalamud.zip

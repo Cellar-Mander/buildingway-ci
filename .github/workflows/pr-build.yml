@@ -1,0 +1,57 @@
+name: PR build
+
+# Checks formatting, builds the whole solution against the project's pinned Dalamud (see the
+# install-dalamud action) and uploads the built plugin for a day so a PR can be tried in-game.
+# The plugin builds against a Dalamud install, so this runs on Windows where the SDK finds it.
+on:
+  workflow_call:
+    inputs:
+      plugin:
+        description: Plugin project name; the artifact is <plugin>/bin/x64/Release/<plugin>/*
+        required: true
+        type: string
+      dotnet-version:
+        description: .NET SDK version for actions/setup-dotnet
+        required: false
+        type: string
+        default: 10.0.x
+
+permissions:
+  contents: read
+
+jobs:
+
+  build:
+    name: build
+    runs-on: windows-2022
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Install .NET
+      uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+
+    # A reusable workflow can't name its own commit, so this pins an earlier commit of this repo.
+    # After changing the action, bump this SHA in a later commit; the self-pins job in ci.yml
+    # fails until the pin matches the action.
+    - name: Install Dalamud
+      uses: Cellar-Mander/buildingway-ci/.github/actions/install-dalamud@6fecf821c89716de955f5accb1e353471c2b4b23
+
+    - name: Check formatting
+      run: dotnet format --verify-no-changes
+
+    - name: Build
+      run: dotnet build -c Release
+
+    - name: Upload plugin
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.plugin }}
+        path: ${{ inputs.plugin }}/bin/x64/Release/${{ inputs.plugin }}/*
+        if-no-files-found: error
+        retention-days: 1

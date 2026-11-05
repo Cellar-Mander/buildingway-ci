@@ -1,0 +1,44 @@
+name: CI
+
+# Checks this repo itself. No path filter: a required check that a filter skips never reports.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+
+  lint:
+    uses: ./.github/workflows/workflow-lint.yml
+
+  # The reusable workflows pin this repo's own actions to an earlier commit (they can't name
+  # their own). Fail when a pin points at a commit whose action differs from this one's, so an
+  # action change can't ship without the pin that uses it.
+  self-pins:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        fetch-depth: 0
+
+    - name: Check self-pins
+      run: |
+        status=0
+        while IFS=: read -r file line ref; do
+          path=${ref%@*}
+          path=${path#*uses: Cellar-Mander/buildingway-ci/}
+          sha=${ref##*@}
+          sha=${sha%% *}
+          if ! git diff --quiet "$sha" HEAD -- "$path"; then
+            echo "::error file=$file,line=$line::$path at $sha differs from this commit's; bump the pin to a commit that has the current action"
+            status=1
+          fi
+        done < <(grep -rnE 'uses: Cellar-Mander/buildingway-ci/[^@]+@[0-9a-f]{40}' .github/workflows)
+        exit "$status"
