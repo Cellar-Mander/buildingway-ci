@@ -52,8 +52,16 @@ trigger on the label events (`labeled`, plus `unlabeled` for the changelog) and 
 `no-changelog` and `mutation` labels. Keep the caller's own triggers: a schedule for nightly
 mutation runs, and a path filter naming the code under test.
 
-`test.yml`'s `revert-check` runs the caller's `tools/revert-check`; set `revert-check: false` if
-the project has none.
+`test.yml`'s `revert-check` runs `dotnet buildingway revert-check`, so the caller's
+`.config/dotnet-tools.json` must list `Buildingway.Tools`
+([buildingway-tools](https://github.com/Cellar-Mander/buildingway-tools)); set
+`revert-check: false` if it doesn't.
+
+`Buildingway.Tools` comes from GitHub Packages, which needs a token even for public packages.
+The `revert-check` and `mutation` jobs pass `github.token` for a feed the caller's `nuget.config`
+names `buildingway` (see buildingway-tools' README), so the caller must grant them
+`packages: read` and the package's settings must give the caller's repo Read under
+"Manage Actions access". That grant also lets Dependabot update the tool.
 
 ## release.yml
 
