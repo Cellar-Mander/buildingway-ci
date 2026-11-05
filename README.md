@@ -52,8 +52,10 @@ trigger on the label events (`labeled`, plus `unlabeled` for the changelog) and 
 `no-changelog` and `mutation` labels. Keep the caller's own triggers: a schedule for nightly
 mutation runs, and a path filter naming the code under test.
 
-`test.yml`'s `revert-check` runs the caller's `tools/revert-check`; set `revert-check: false` if
-the project has none.
+`test.yml`'s `revert-check` runs `dotnet buildingway revert-check`, so the caller's
+`.config/dotnet-tools.json` must list `Buildingway.Tools`
+([buildingway-tools](https://github.com/Cellar-Mander/buildingway-tools)); set
+`revert-check: false` if it doesn't.
 
 ## release.yml
 

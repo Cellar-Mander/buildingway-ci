@@ -1,8 +1,9 @@
 name: Tests
 
 # Runs a project's game-independent tests; the plugin project itself needs a Dalamud install to
-# build, so the test project must not reference it. On pull requests, revert-check also runs the
-# caller's tools/revert-check: do the PR's new or changed tests fail with its product changes
+# build, so the test project must not reference it. On pull requests, revert-check also runs
+# `dotnet buildingway revert-check` from the caller's tool manifest (Buildingway.Tools in
+# .config/dotnet-tools.json): do the PR's new or changed tests fail with its product changes
 # reverted? It informs only, so keep "<job> / revert-check" out of required checks.
 on:
   workflow_call:
@@ -12,7 +13,7 @@ on:
         required: true
         type: string
       revert-check:
-        description: Run tools/revert-check on pull requests
+        description: Run dotnet buildingway revert-check on pull requests
         required: false
         type: boolean
         default: true
@@ -64,9 +65,12 @@ jobs:
       with:
         dotnet-version: ${{ inputs.dotnet-version }}
 
+    - name: Restore tools
+      run: dotnet tool restore
+
     - name: Revert check
       env:
         TEST_PROJECT: ${{ inputs.test-project }}
       run: >-
-        python3 tools/revert-check --ci --test-cmd
+        dotnet buildingway revert-check --ci --test-cmd
         "dotnet build '$TEST_PROJECT' --nologo -v q && dotnet test '$TEST_PROJECT' --nologo --no-build --logger \"trx;LogFileName={trx}\""
