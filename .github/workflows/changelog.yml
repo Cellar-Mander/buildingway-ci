@@ -1,0 +1,55 @@
+name: Changelog
+
+# Flags a pull request that changes the plugin's code without saying what changed for users in the
+# changelog. Informs only: keep "<job> / changelog" out of required checks. A PR labelled
+# no-changelog (a change users won't notice) is skipped, as are Dependabot's, since package bumps
+# don't change behaviour users see. The caller triggers on pull_request with types opened,
+# synchronize, reopened, labeled and unlabeled, so adding or removing the label reruns it.
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: >-
+          Space-separated git pathspecs that count as plugin code, e.g. "MyPlugin/ MyPlugin.Core/";
+          the trailing slashes keep MyPlugin.Core.Tests out
+        required: true
+        type: string
+      changelog:
+        description: Changelog file that must change alongside them
+        required: false
+        type: string
+        default: CHANGELOG.md
+
+permissions:
+  contents: read
+
+jobs:
+
+  changelog:
+    name: changelog
+    if: >-
+      ${{ github.event_name == 'pull_request' &&
+      !contains(github.event.pull_request.labels.*.name, 'no-changelog') &&
+      github.event.pull_request.user.login != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        fetch-depth: 0
+
+    - name: Check changelog
+      env:
+        BASE: ${{ github.event.pull_request.base.sha }}
+        HEAD: ${{ github.event.pull_request.head.sha }}
+        PATHS: ${{ inputs.paths }}
+        CHANGELOG: ${{ inputs.changelog }}
+      run: |
+        read -ra paths <<<"$PATHS"
+        if ! git diff --quiet "$BASE...$HEAD" -- "${paths[@]}" &&
+            git diff --quiet "$BASE...$HEAD" -- "$CHANGELOG"; then
+          echo "::error file=$CHANGELOG::This PR changes plugin code but not $CHANGELOG. Add an entry under Unreleased, or label the PR no-changelog if users won't notice the change."
+          exit 1
+        fi
