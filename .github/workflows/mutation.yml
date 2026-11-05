@@ -1,0 +1,68 @@
+name: Mutation
+
+# Would the tests catch plausible faults? Stryker.NET mutates the code under test and reruns the
+# tests. Informs only: no score threshold, and keep "<job> / mutation" out of required checks.
+# Stryker must be a local tool in the caller's tool manifest (dotnet-tools.json), with its settings
+# in the test project's stryker-config.json. On pull requests only mutants in code or tests changed against
+# the base branch are tested; a PR labelled mutation gets a full run instead, e.g. when tests were
+# deleted. Other events (schedule, workflow_dispatch) always get a full run. The caller triggers on
+# pull_request with types opened, synchronize, reopened and labeled; other labels start no run.
+on:
+  workflow_call:
+    inputs:
+      test-project:
+        description: Test project folder holding stryker-config.json, e.g. MyPlugin.Core.Tests
+        required: true
+        type: string
+      dotnet-version:
+        description: .NET SDK version for actions/setup-dotnet
+        required: false
+        type: string
+        default: 10.0.x
+
+permissions:
+  contents: read
+
+jobs:
+
+  mutation:
+    name: mutation
+    if: github.event.action != 'labeled' || github.event.label.name == 'mutation'
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        # --since diffs against the base branch
+        fetch-depth: 0
+
+    - name: Install .NET
+      uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+
+    - name: Restore tools
+      run: dotnet tool restore
+
+    - name: Mutation test
+      working-directory: ${{ inputs.test-project }}
+      env:
+        SINCE: >-
+          ${{ github.event_name == 'pull_request'
+          && !contains(github.event.pull_request.labels.*.name, 'mutation')
+          && format('--since:origin/{0}', github.base_ref) || '' }}
+      run: dotnet stryker ${SINCE:+"$SINCE"} --output "$RUNNER_TEMP/stryker"
+
+    - name: Summary
+      if: always()
+      run: cat "$RUNNER_TEMP/stryker/reports/mutation-report.md" >> "$GITHUB_STEP_SUMMARY" || true
+
+    - name: Upload report
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: mutation-report
+        path: ${{ runner.temp }}/stryker/reports/
+        if-no-files-found: ignore
