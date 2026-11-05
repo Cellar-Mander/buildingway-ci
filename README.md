@@ -32,6 +32,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  packages: read
 jobs:
   test:
     uses: Cellar-Mander/buildingway-ci/.github/workflows/test.yml@<sha> # v0.1.0
@@ -39,8 +40,9 @@ jobs:
       test-project: MyPlugin.Core.Tests
 ```
 
-The caller's `permissions:` caps what the called jobs get; all of these need only
-`contents: read`. A workflow that builds the plugin itself (a release, say) can use the action
+The caller's `permissions:` caps what the called jobs get. `changelog.yml` and
+`workflow-lint.yml` need only `contents: read`; `test.yml`, `pr-build.yml` and `mutation.yml`
+also need `packages: read` (see below), or the run fails to start. A workflow that builds the plugin itself (a release, say) can use the action
 directly after checking out:
 
 ```yaml
@@ -57,17 +59,20 @@ mutation runs, and a path filter naming the code under test.
 ([buildingway-tools](https://github.com/Cellar-Mander/buildingway-tools)); set
 `revert-check: false` if it doesn't.
 
-`Buildingway.Tools` comes from GitHub Packages, which needs a token even for public packages.
-The `revert-check` and `mutation` jobs pass `github.token` for a feed the caller's `nuget.config`
-names `buildingway` (see buildingway-tools' README), so the caller must grant them
-`packages: read` and the package's settings must give the caller's repo Read under
-"Manage Actions access". That grant also lets Dependabot update the tool.
+`Buildingway.Tools` and the `Buildingway.Build` MSBuild SDK
+([buildingway-build](https://github.com/Cellar-Mander/buildingway-build)) come from GitHub
+Packages, which needs a token even for public packages. Every job that restores, builds or
+formats the caller's projects (`test.yml`, `pr-build.yml`, `mutation.yml` and `release.yml`'s
+build) passes `github.token` for a feed the caller's `nuget.config` names `buildingway` (see
+buildingway-tools' README). So the caller must grant `packages: read`, and each package's
+settings must give the caller's repo Read under "Manage Actions access". That grant also lets
+Dependabot update them. A caller without these packages loses nothing by granting it.
 
 ## release.yml
 
 The caller runs on a pushed `v*` tag and on `workflow_dispatch` with a `channel` choice. It must
 set `concurrency: release` at its top level (two runs would race on repo.json; the reusable
-workflow can't set the same group without cancelling itself) and grant the three permissions
+workflow can't set the same group without cancelling itself) and grant the four permissions
 the jobs need:
 
 ```yaml
@@ -90,6 +95,7 @@ jobs:
     permissions:
       actions: write        # dispatches the required checks on the repo.json PR
       contents: write       # pushes the tag, the release and the repo.json branch
+      packages: read        # Buildingway.* packages from GitHub Packages for the build
       pull-requests: write  # opens the repo.json PR
     uses: Cellar-Mander/buildingway-ci/.github/workflows/release.yml@<sha> # v0.2.0
     with:

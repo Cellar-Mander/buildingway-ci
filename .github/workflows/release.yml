@@ -133,6 +133,7 @@ jobs:
     runs-on: windows-2022
     permissions:
       contents: read
+      packages: read  # Buildingway.Build and other Buildingway.* packages from GitHub Packages
     env:
       PLUGIN: ${{ inputs.plugin }}
       TAG: ${{ github.ref_type == 'tag' && github.ref_name || needs.tag.outputs.tag }}
@@ -185,7 +186,10 @@ jobs:
         printf '%s\n' "$notes" > notes.md
         sed -E 's/^#+ +(.*)/\1:/; s/^( *)[-*] /\1• /; s/\[([^]]*)\]\(([^)]*)\)/\1 (\2)/g; s/\*\*|__|`//g' notes.md > changelog.txt
 
+    # Loading a project that uses the Buildingway.Build SDK reads the caller's "buildingway" feed
     - name: Build
+      env:
+        NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: dotnet build -c Release -p:ChangelogFile="$PWD\changelog.txt"
 
     # DalamudPackager writes the zip and the manifest the repo.json entry is made from

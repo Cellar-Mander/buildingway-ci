@@ -24,6 +24,9 @@ jobs:
   build:
     name: build
     runs-on: windows-2022
+    permissions:
+      contents: read
+      packages: read  # Buildingway.Build and other Buildingway.* packages from GitHub Packages
 
     steps:
     - name: Checkout
@@ -42,10 +45,15 @@ jobs:
     - name: Install Dalamud
       uses: Cellar-Mander/buildingway-ci/.github/actions/install-dalamud@a5e4eb37a0fdeff14f16ac4fde4de475e0ff2666
 
+    # Loading a project that uses the Buildingway.Build SDK reads the caller's "buildingway" feed
     - name: Check formatting
+      env:
+        NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: dotnet format --verify-no-changes
 
     - name: Build
+      env:
+        NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: dotnet build -c Release
 
     - name: Upload plugin
