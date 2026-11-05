@@ -8,6 +8,8 @@ thin caller workflows, and the composite action they use to install a pinned Dal
 | `test.yml` | `test`; `revert-check` on pull requests (informs only; don't require it) | `test-project` (required), `revert-check` (default true), `dotnet-version` |
 | `pr-build.yml` | `build`: format check, Release build, plugin artifact | `plugin` (required), `dotnet-version` |
 | `workflow-lint.yml` | `actionlint`, `zizmor` | none |
+| `changelog.yml` | `changelog` on pull requests: fails when plugin code changed but the changelog didn't (informs only; skipped for the `no-changelog` label and Dependabot) | `paths` (required), `changelog` (default `CHANGELOG.md`) |
+| `mutation.yml` | `mutation`: Stryker.NET; pull requests test only changed code unless labelled `mutation` (informs only) | `test-project` (required), `dotnet-version` |
 
 | Action | Does |
 |---|---|
@@ -43,6 +45,11 @@ directly after checking out:
 ```yaml
     - uses: Cellar-Mander/buildingway-ci/.github/actions/install-dalamud@<sha> # v0.1.0
 ```
+
+`changelog.yml` and `mutation.yml` read the caller's pull request labels, so the caller must
+trigger on the label events (`labeled`, plus `unlabeled` for the changelog) and the repo needs the
+`no-changelog` and `mutation` labels. Keep the caller's own triggers: a schedule for nightly
+mutation runs, and a path filter naming the code under test.
 
 `test.yml`'s `revert-check` runs the caller's `tools/revert-check`; set `revert-check: false` if
 the project has none.
