@@ -1,1 +1,1 @@
-Throwaway file to test branch protection.
+Throwaway file, second commit.
