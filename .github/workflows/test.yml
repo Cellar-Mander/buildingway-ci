@@ -4,7 +4,9 @@ name: Tests
 # build, so the test project must not reference it. On pull requests, revert-check also runs
 # `dotnet buildingway revert-check` from the caller's tool manifest (Buildingway.Tools in
 # .config/dotnet-tools.json): do the PR's new or changed tests fail with its product changes
-# reverted? It informs only, so keep "<job> / revert-check" out of required checks.
+# reverted? It informs only, so keep "<job> / revert-check" out of required checks. Its verdicts go
+# to a revert-check artifact (revert-check.json), which mutation.yml's kill-report joins with the
+# mutation run; that needs Buildingway.Tools 0.2.0 or later (revert-check --json).
 on:
   workflow_call:
     inputs:
@@ -85,5 +87,14 @@ jobs:
         TEST_PROJECT: ${{ inputs.test-project }}
         NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: >-
-        dotnet buildingway revert-check --ci --test-cmd
+        dotnet buildingway revert-check --ci --json "$RUNNER_TEMP/revert-check.json" --test-cmd
         "dotnet build '$TEST_PROJECT' --nologo -v q && dotnet test '$TEST_PROJECT' --nologo --no-build --logger \"trx;LogFileName={trx}\""
+
+    # Also when revert-check exits 1 (a test that doesn't guard the change): its verdicts are still valid
+    - name: Upload verdicts
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: revert-check
+        path: ${{ runner.temp }}/revert-check.json
+        if-no-files-found: ignore
