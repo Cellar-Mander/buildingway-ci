@@ -10,7 +10,7 @@ thin caller workflows, and the composite action they use to install a pinned Dal
 | `workflow-lint.yml` | `actionlint`, `zizmor` | none |
 | `release.yml` | `tag`, `build`, `publish`: tag main's `<Version>`, build, GitHub release, repo.json PR | `plugin` (required), `channel`, `checks`, `dotnet-version` |
 | `changelog.yml` | `changelog` on pull requests: fails when plugin code changed but the changelog didn't (informs only; skipped for the `no-changelog` label and Dependabot) | `paths` (required), `changelog` (default `CHANGELOG.md`) |
-| `mutation.yml` | `mutation`: Stryker.NET; pull requests test only changed code unless labelled `mutation` (informs only) | `test-project` (required), `dotnet-version` |
+| `mutation.yml` | `mutation`: Stryker.NET; pull requests test only changed code unless labelled `mutation`. `kill-report` on pull requests: which new and changed tests kill mutants on the changed lines, joined with `test.yml`'s revert-check (both inform only) | `test-project` (required), `dotnet-version` |
 
 | Action | Does |
 |---|---|
@@ -42,7 +42,8 @@ jobs:
 
 The caller's `permissions:` caps what the called jobs get. `changelog.yml` and
 `workflow-lint.yml` need only `contents: read`; `test.yml`, `pr-build.yml` and `mutation.yml`
-also need `packages: read` (see below), or the run fails to start. A workflow that builds the plugin itself (a release, say) can use the action
+also need `packages: read` (see below), or the run fails to start. `mutation.yml` also needs
+`actions: read`: its `kill-report` reads the revert-check artifact from the caller's Tests run. A workflow that builds the plugin itself (a release, say) can use the action
 directly after checking out:
 
 ```yaml
@@ -58,6 +59,14 @@ mutation runs, and a path filter naming the code under test.
 `.config/dotnet-tools.json` must list `Buildingway.Tools`
 ([buildingway-tools](https://github.com/Cellar-Mander/buildingway-tools)); set
 `revert-check: false` if it doesn't.
+
+`mutation.yml`'s `kill-report` joins the mutation report with the revert-check verdicts that
+`test.yml` uploads for the same commit (`dotnet buildingway mutant-triage tests`), waiting up to 20
+minutes for the Tests run to finish. It needs `Buildingway.Tools` 0.2.0 or later (for
+`revert-check --json` and `mutant-triage tests`) and the `json` reporter in `stryker-config.json`.
+It runs only on changed-code runs, where Stryker runs every test against each mutant
+(`--disable-bail`) so the report names all its killers; it says why and passes when either report
+is missing.
 
 `Buildingway.Tools` and the `Buildingway.Build` MSBuild SDK
 ([buildingway-build](https://github.com/Cellar-Mander/buildingway-build)) come from GitHub

@@ -7,6 +7,13 @@ name: Mutation
 # the base branch are tested; a PR labelled mutation gets a full run instead, e.g. when tests were
 # deleted. Other events (schedule, workflow_dispatch) always get a full run. The caller triggers on
 # pull_request with types opened, synchronize, reopened and labeled; other labels start no run.
+#
+# On those changed-code runs Stryker runs every test against each mutant (--disable-bail), so the
+# report names every test that kills it, and kill-report joins it with test.yml's revert-check
+# verdicts: which of the PR's new and changed tests kill mutants on its changed lines. kill-report
+# reads the revert-check artifact from the caller's Tests run for the same commit, waiting for that
+# run if it is still going, so the caller must grant actions: read, and its Buildingway.Tools must be
+# 0.2.0 or later. It never starts a mutation run of its own, and passes when either report is missing.
 on:
   workflow_call:
     inputs:
@@ -32,6 +39,9 @@ jobs:
     permissions:
       contents: read
       packages: read  # Buildingway.Tools and Buildingway.Build from GitHub Packages
+    outputs:
+      # Whether the report names every killing test (a changed-code run), as kill-report needs
+      all-killers: ${{ steps.stryker.outputs.all-killers }}
 
     steps:
     - name: Checkout
@@ -54,6 +64,7 @@ jobs:
       run: dotnet tool restore
 
     - name: Mutation test
+      id: stryker
       working-directory: ${{ inputs.test-project }}
       env:
         SINCE: >-
@@ -61,7 +72,11 @@ jobs:
           && !contains(github.event.pull_request.labels.*.name, 'mutation')
           && format('--since:origin/{0}', github.base_ref) || '' }}
         NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
-      run: dotnet stryker ${SINCE:+"$SINCE"} --output "$RUNNER_TEMP/stryker"
+      # Without --disable-bail Stryker stops each mutant's run at its first failing test and names only
+      # that one; a full run keeps bailing, as it tests every mutant and no kill report reads it
+      run: |
+        echo "all-killers=${SINCE:+true}" >> "$GITHUB_OUTPUT"
+        dotnet stryker ${SINCE:+"$SINCE" --disable-bail} --output "$RUNNER_TEMP/stryker"
 
     - name: Summary
       if: always()
@@ -74,3 +89,94 @@ jobs:
         name: mutation-report
         path: ${{ runner.temp }}/stryker/reports/
         if-no-files-found: ignore
+
+  kill-report:
+    name: kill-report
+    needs: mutation
+    if: always() && github.event_name == 'pull_request' && needs.mutation.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read  # Buildingway.Tools from GitHub Packages
+      actions: read   # finds and downloads the Tests run's revert-check artifact
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        # mutant-triage diffs the changed lines against revert-check's merge base
+        fetch-depth: 0
+
+    - name: Install .NET
+      uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+
+    - name: Restore tools
+      env:
+        NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
+      run: dotnet tool restore
+
+    - name: Download mutation report
+      continue-on-error: true  # a failed or cancelled run may have uploaded nothing
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: mutation-report
+        path: reports/mutation
+
+    # The newest revert-check artifact from a run for the PR's head commit. Until one exists, wait
+    # while any other run for that commit is unfinished; checking for unfinished runs before
+    # looking for the artifact means a run that finished in between can't be missed.
+    - name: Download revert-check verdicts
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        RUN_ID: ${{ github.run_id }}
+      run: |
+        deadline=$((SECONDS + 20 * 60))
+        while :; do
+          busy=$(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&per_page=100" \
+            --jq "[.workflow_runs[] | select(.id != $RUN_ID and .status != \"completed\")] | length")
+          run=$(gh api "repos/$REPO/actions/artifacts?name=revert-check&per_page=100" \
+            --jq "[.artifacts[] | select(.workflow_run.head_sha == \"$HEAD_SHA\" and (.expired | not))]
+                  | max_by(.created_at) | .workflow_run.id // empty")
+          if [ -n "$run" ]; then
+            gh run download "$run" --repo "$REPO" --name revert-check --dir reports/revert-check
+            echo "revert-check verdicts from run $run"
+            break
+          fi
+          if [ "$busy" = 0 ]; then
+            echo "No run for $HEAD_SHA uploaded revert-check verdicts."
+            break
+          fi
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "Gave up after 20 minutes: $busy run(s) for $HEAD_SHA still going, none with revert-check verdicts yet."
+            break
+          fi
+          sleep 30
+        done
+
+    - name: Kill report
+      env:
+        ALL_KILLERS: ${{ needs.mutation.outputs.all-killers }}
+        NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
+      run: |
+        rc=reports/revert-check/revert-check.json
+        report=reports/mutation/mutation-report.json
+        if [ ! -f "$report" ]; then
+          msg="No kill report: no mutation report (the run failed, or stryker-config.json lacks the json reporter)."
+        elif [ ! -f "$rc" ]; then
+          msg="No kill report: no revert-check verdicts for this commit (revert-check off, or its run failed before writing them)."
+        elif [ "$ALL_KILLERS" != true ]; then
+          msg="No kill report: this was a full mutation run, which names only the first killing test of each mutant."
+        fi
+        if [ -n "${msg-}" ]; then
+          echo "$msg"
+          { echo '## Kill report'; echo; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+        dotnet buildingway mutant-triage tests --revert "$rc" "$report" | tee kill-report.txt
+        { echo '## Kill report'; echo; echo '```'; cat kill-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
