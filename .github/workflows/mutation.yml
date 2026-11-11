@@ -14,6 +14,8 @@ name: Mutation
 # reads the revert-check artifact from the caller's Tests run for the same commit, waiting for that
 # run if it is still going, so the caller must grant actions: read, and its Buildingway.Tools must be
 # 0.2.0 or later. It never starts a mutation run of its own, and passes when either report is missing.
+# Buildingway.Tools can't list itself in its own tool manifest, so it sets buildingway-project and
+# kill-report runs the tool the PR builds.
 on:
   workflow_call:
     inputs:
@@ -21,6 +23,13 @@ on:
         description: Test project folder holding stryker-config.json, e.g. MyPlugin.Core.Tests
         required: true
         type: string
+      buildingway-project:
+        description: >-
+          Project kill-report runs with dotnet run as buildingway instead of the caller's tool manifest's
+          (Buildingway.Tools itself sets Buildingway.Tools)
+        required: false
+        type: string
+        default: ''
       dotnet-version:
         description: .NET SDK version for actions/setup-dotnet
         required: false
@@ -159,9 +168,12 @@ jobs:
           sleep 30
         done
 
+    # bash -eo pipefail: a mutant-triage that can't run fails the job instead of writing an empty report
     - name: Kill report
+      shell: bash
       env:
         ALL_KILLERS: ${{ needs.mutation.outputs.all-killers }}
+        BUILDINGWAY_PROJECT: ${{ inputs.buildingway-project }}
         NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: |
         rc=reports/revert-check/revert-check.json
@@ -178,5 +190,10 @@ jobs:
           { echo '## Kill report'; echo; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
           exit 0
         fi
-        dotnet buildingway mutant-triage tests --revert "$rc" "$report" | tee kill-report.txt
+        buildingway=(dotnet buildingway)
+        if [ -n "$BUILDINGWAY_PROJECT" ]; then
+          dotnet build "$BUILDINGWAY_PROJECT" -c Release --nologo -v q
+          buildingway=(dotnet run --project "$BUILDINGWAY_PROJECT" -c Release --no-build --)
+        fi
+        "${buildingway[@]}" mutant-triage tests --revert "$rc" "$report" | tee kill-report.txt
         { echo '## Kill report'; echo; echo '```'; cat kill-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

@@ -10,7 +10,7 @@ thin caller workflows, and the composite action they use to install a pinned Dal
 | `workflow-lint.yml` | `actionlint`, `zizmor` | none |
 | `release.yml` | `tag`, `build`, `publish`: tag main's `<Version>`, build, GitHub release, repo.json PR | `plugin` (required), `channel`, `checks`, `dotnet-version` |
 | `changelog.yml` | `changelog` on pull requests: fails when plugin code changed but the changelog didn't (informs only; skipped for the `no-changelog` label and Dependabot) | `paths` (required), `changelog` (default `CHANGELOG.md`) |
-| `mutation.yml` | `mutation`: Stryker.NET; pull requests test only changed code unless labelled `mutation`. `kill-report` on pull requests: which new and changed tests kill mutants on the changed lines, joined with `test.yml`'s revert-check (both inform only) | `test-project` (required), `dotnet-version` |
+| `mutation.yml` | `mutation`: Stryker.NET; pull requests test only changed code unless labelled `mutation`. `kill-report` on pull requests: which new and changed tests kill mutants on the changed lines, joined with `test.yml`'s revert-check (both inform only) | `test-project` (required), `buildingway-project`, `dotnet-version` |
 
 | Action | Does |
 |---|---|
@@ -67,6 +67,8 @@ minutes for the Tests run to finish. It needs `Buildingway.Tools` 0.2.0 or later
 It runs only on changed-code runs, where Stryker runs every test against each mutant
 (`--disable-bail`) so the report names all its killers; it says why and passes when either report
 is missing.
+`Buildingway.Tools` itself can't list itself in its tool manifest, so it passes
+`buildingway-project: Buildingway.Tools` and `kill-report` runs the tool the PR builds instead.
 
 `Buildingway.Tools` and the `Buildingway.Build` MSBuild SDK
 ([buildingway-build](https://github.com/Cellar-Mander/buildingway-build)) come from GitHub
