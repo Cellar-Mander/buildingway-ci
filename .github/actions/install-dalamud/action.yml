@@ -1,5 +1,5 @@
 name: Install Dalamud
-description: Installs the project's pinned Dalamud build where Dalamud.NET.Sdk finds it on Windows
+description: Installs the project's pinned Dalamud build where Dalamud.NET.Sdk finds it on Windows, or into a given directory
 
 # The pin lives in the calling project (default .github/dalamud.env, read from the checkout), so
 # its PR builds and releases build against the same Dalamud it was tested with, not whatever
@@ -17,6 +17,10 @@ inputs:
     description: Path of the pin file in the checkout
     required: false
     default: .github/dalamud.env
+  path:
+    description: Directory to install into; empty for the Windows dev directory Dalamud.NET.Sdk finds by default
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -25,13 +29,14 @@ runs:
     shell: pwsh
     env:
       PIN_FILE: ${{ inputs.pin-file }}
+      INSTALL_PATH: ${{ inputs.path }}
     run: |
       $pin = Get-Content -Raw $env:PIN_FILE | ConvertFrom-StringData
       foreach ($key in 'DALAMUD_VERSION', 'DALAMUD_COMMIT', 'DALAMUD_SHA256') {
         if (-not $pin[$key]) { throw "$env:PIN_FILE has no $key" }
       }
       if ($pin.DALAMUD_COMMIT -notmatch '^[0-9a-f]{40}$') { throw "DALAMUD_COMMIT in $env:PIN_FILE isn't a full commit SHA" }
-      $dev = Join-Path $env:APPDATA 'XIVLauncher\addon\Hooks\dev'
+      $dev = if ($env:INSTALL_PATH) { $env:INSTALL_PATH } else { Join-Path $env:APPDATA 'XIVLauncher\addon\Hooks\dev' }
       Invoke-WebRequest "https://raw.githubusercontent.com/goatcorp/dalamud-distrib/$($pin.DALAMUD_COMMIT)/latest.zip" -OutFile dalamud.zip
       if ((Get-FileHash dalamud.zip -Algorithm SHA256).Hash -ne $pin.DALAMUD_SHA256) {
         throw "dalamud.zip for Dalamud $($pin.DALAMUD_VERSION) doesn't match the pinned SHA-256"
