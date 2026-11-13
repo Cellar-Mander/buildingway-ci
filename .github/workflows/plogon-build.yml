@@ -1,0 +1,182 @@
+name: Plogon build
+
+# Reproduces the build that Plogon (https://github.com/goatcorp/Plogon) runs for the official
+# Dalamud plugin repo (D17), so a project finds out on its own PRs, not on its D17 submission, that
+# Plogon can't build it. Plogon builds offline from packages it fetched beforehand, so anything the
+# build needs from elsewhere (the Buildingway.Build SDK from GitHub Packages, say) fails there.
+# This job therefore needs no token and no packages: read.
+#
+# What it copies from Plogon, as of goatcorp/Plogon master 2b0e54d (Plogon/BuildProcessor.cs and
+# Plogon/static/entrypoint.sh). Plogon can change any of this; when its builds and this job
+# disagree, compare these against Plogon's current code first:
+# - Packages (RestoreAllPackages): every packages.lock.json in the repo (at least one; lockfile
+#   version 1), every dependency whose type isn't Project, at its resolved version. Plus the
+#   runtime packs for each target framework in the lockfiles (GetRuntimeDependencies and its
+#   runtimePackages table, copied into the Fetch packages step; a failed download only warns), and
+#   the SDKs in forcePackages, since SDKs aren't in lockfiles (the force-packages input). Each comes
+#   from https://api.nuget.org/v3-flatcontainer/{id}/{version}/{id}.{version}.nupkg into a local
+#   folder.
+# - nuget.config (WriteNugetConfig): the repo root's is overwritten with <clear /> and that folder
+#   as the only source. Nested nuget.config files are left alone, as Plogon leaves them.
+# - Build: in the mcr.microsoft.com/dotnet/sdk image at Plogon's DockerTag (the sdk-version input),
+#   with the network off (NetworkDisabled), so the package cache starts empty. The repo is at
+#   /work/repo, Dalamud read-only at /work/dalamud, the packages read-only at /packages, and the
+#   build runs in the project directory (the manifest's project_path) with entrypoint.sh's command.
+#   Plogon also passes -p:Version when the manifest sets a version; this doesn't.
+# - The check that a csproj spells Dalamud.NET.Sdk with exactly that casing.
+# Plogon builds against the Dalamud of the plugin's channel; this builds against the project's
+# pinned one (see the install-dalamud action).
+#
+# Projects that use the Buildingway.Build SDK import it with Condition="'$(IsPlogonBuild)' != 'True'"
+# so this build, like Plogon's, skips it.
+on:
+  workflow_call:
+    inputs:
+      project-dir:
+        description: Plugin project directory relative to the repo root (the D17 manifest's project_path)
+        required: true
+        type: string
+      sdk-version:
+        description: Tag of the mcr.microsoft.com/dotnet/sdk image (Plogon's DockerTag)
+        required: false
+        type: string
+        default: 10.0.101
+      force-packages:
+        description: Space-separated <id>/<version> packages fetched besides the lockfiles' (Plogon's forcePackages)
+        required: false
+        type: string
+        default: Dalamud.NET.Sdk/15.0.0
+
+permissions:
+  contents: read
+
+jobs:
+
+  plogon-build:
+    name: plogon-build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        submodules: recursive  # Plogon fetches submodules too
+
+    # A reusable workflow can't name its own commit, so this pins an earlier commit of this repo.
+    # After changing the action, bump this SHA in a later commit; the self-pins job in ci.yml
+    # fails until the pin matches the action.
+    - name: Install Dalamud
+      uses: Cellar-Mander/buildingway-ci/.github/actions/install-dalamud@364a27d5f22ca8377b2b33cde139de67ed45189c
+      with:
+        path: ${{ runner.temp }}/dalamud
+
+    - name: Check Dalamud.NET.Sdk casing
+      run: |
+        status=0
+        while IFS= read -r -d '' csproj; do
+          if grep -qi 'Dalamud\.NET\.Sdk' "$csproj" && ! grep -q 'Dalamud\.NET\.Sdk' "$csproj"; then
+            echo "::error file=${csproj#./}::Dalamud.NET.Sdk reference isn't capitalized as Dalamud.NET.Sdk; Plogon rejects it"
+            status=1
+          fi
+        done < <(find . -name '*.csproj' -print0)
+        exit "$status"
+
+    - name: Fetch packages
+      env:
+        FORCE_PACKAGES: ${{ inputs.force-packages }}
+        PACKAGES: ${{ runner.temp }}/packages
+      run: |
+        # Plogon's runtimePackages: runtime pack versions per target framework
+        declare -A runtime_versions=(
+          [.NETStandard,Version=v2.0]='2.0.0'
+          [net5.0]='5.0.0'
+          [net6.0]='6.0.0 6.0.11'
+          [net7.0]='7.0.0 7.0.1 7.0.14 7.0.15'
+          [net8.0]='8.0.0'
+          [net9.0]='9.0.3'
+          [net10.0]='10.0.0'
+        )
+        mapfile -t lockfiles < <(find . -name packages.lock.json)
+        if (( ${#lockfiles[@]} == 0 )); then
+          echo "::error::No packages.lock.json in the repo; Plogon needs them committed"
+          exit 1
+        fi
+        required=$(mktemp) runtime=$(mktemp)
+        for lockfile in "${lockfiles[@]}"; do
+          version=$(jq '.version' "$lockfile")
+          if [[ $version != 1 ]]; then
+            echo "::error file=${lockfile#./}::Lockfile version $version; Plogon reads only version 1"
+            exit 1
+          fi
+          jq -r '.dependencies[] | to_entries[] | select(.value.type != "Project") | "\(.key) \(.value.resolved)"' "$lockfile" >> "$required"
+          while IFS= read -r framework; do
+            key=${framework%%/*} key=${key%%-*} rid=
+            [[ $framework == */* ]] && rid=${framework#*/}
+            if [[ ! -v runtime_versions[$key] ]]; then
+              echo "::error file=${lockfile#./}::Plogon knows no runtime packs for $framework"
+              exit 1
+            fi
+            for v in ${runtime_versions[$key]}; do
+              if [[ -z $rid ]]; then
+                printf '%s %s\n' Microsoft.NETCore.App.Ref "$v" Microsoft.AspNetCore.App.Ref "$v" Microsoft.WindowsDesktop.App.Ref "$v"
+              else
+                printf '%s %s\n' "Microsoft.NETCore.App.Runtime.$rid" "$v" "Microsoft.AspNetCore.App.Runtime.$rid" "$v" "Microsoft.NETCore.App.Host.$rid" "$v"
+              fi >> "$runtime"
+            done
+          done < <(jq -r '.dependencies | keys[]' "$lockfile")
+        done
+        for package in $FORCE_PACKAGES; do
+          echo "${package%/*} ${package#*/}" >> "$required"
+        done
+
+        mkdir -p "$PACKAGES"
+        # fetch <required|runtime> <id> <version>; xargs stops at the first required one that fails
+        fetch() {
+          local id=${2,,} version=$3
+          curl -fsSL --retry 3 -o "$PACKAGES/$id.$version.nupkg" \
+            "https://api.nuget.org/v3-flatcontainer/$id/$version/$id.$version.nupkg" && return
+          if [[ $1 == required ]]; then
+            echo "::error::Failed to fetch $2 $3 from nuget.org"
+            exit 255
+          fi
+          echo "::warning::Failed to fetch runtime pack $2 $3 (Plogon only warns too)"
+        }
+        export -f fetch
+        export PACKAGES
+        # shellcheck disable=SC2016 # $@ expands in the bash that xargs runs
+        sed 's/^/required /' "$required" | sort -u | xargs -r -P 8 -L 1 bash -c 'fetch "$@"' _
+        # shellcheck disable=SC2016
+        sed 's/^/runtime /' "$runtime" | sort -u | xargs -r -P 8 -L 1 bash -c 'fetch "$@"' _
+        echo "Fetched $(find "$PACKAGES" -name '*.nupkg' | wc -l) packages"
+
+    - name: Write nuget.config
+      run: |
+        cat > nuget.config <<'EOF'
+        <?xml version="1.0" encoding="utf-8"?>
+        <configuration>
+          <packageSources>
+            <clear />
+            <add key="plogon" value="/packages" />
+          </packageSources>
+        </configuration>
+        EOF
+
+    - name: Build offline
+      env:
+        PROJECT_DIR: ${{ inputs.project-dir }}
+        SDK_VERSION: ${{ inputs.sdk-version }}
+      run: |
+        if [[ ! -d $PROJECT_DIR || $PROJECT_DIR == /* ]]; then
+          echo "::error::project-dir $PROJECT_DIR isn't a directory in the repo"
+          exit 1
+        fi
+        mkdir -p "$RUNNER_TEMP/output"
+        docker run --rm --network none \
+          -v "$GITHUB_WORKSPACE:/work/repo" \
+          -v "$RUNNER_TEMP/dalamud:/work/dalamud:ro" \
+          -v "$RUNNER_TEMP/packages:/packages:ro" \
+          -v "$RUNNER_TEMP/output:/output" \
+          -w "/work/repo/$PROJECT_DIR" \
+          "mcr.microsoft.com/dotnet/sdk:$SDK_VERSION" \
+          dotnet build -c Release -o /output -p:DalamudLibPath=/work/dalamud/ -p:IsPlogonBuild=True
