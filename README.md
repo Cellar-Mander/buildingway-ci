@@ -11,10 +11,11 @@ thin caller workflows, and the composite action they use to install a pinned Dal
 | `release.yml` | `tag`, `build`, `publish`: tag main's `<Version>`, build, GitHub release, repo.json PR | `plugin` (required), `channel`, `checks`, `dotnet-version` |
 | `changelog.yml` | `changelog` on pull requests: fails when plugin code changed but the changelog didn't (informs only; skipped for the `no-changelog` label and Dependabot) | `paths` (required), `changelog` (default `CHANGELOG.md`) |
 | `mutation.yml` | `mutation`: Stryker.NET; pull requests test only changed code unless labelled `mutation`. `kill-report` on pull requests: which new and changed tests kill mutants on the changed lines, joined with `test.yml`'s revert-check (both inform only) | `test-project` (required), `buildingway-project`, `dotnet-version` |
+| `plogon-build.yml` | `plogon-build`: the plugin built offline the way Plogon builds it for D17, from nuget.org packages only (what it copies from Plogon is in its comments) | `project-dir` (required), `sdk-version`, `force-packages` |
 
 | Action | Does |
 |---|---|
-| `.github/actions/install-dalamud` | Installs the Dalamud pinned in the project's `.github/dalamud.env` (see the comment in its `action.yml`) |
+| `.github/actions/install-dalamud` | Installs the Dalamud pinned in the project's `.github/dalamud.env` (see the comment in its `action.yml`), by default where Dalamud.NET.Sdk finds it on Windows, or into the directory in its `path` input |
 
 ## Using them
 
@@ -40,8 +41,8 @@ jobs:
       test-project: MyPlugin.Core.Tests
 ```
 
-The caller's `permissions:` caps what the called jobs get. `changelog.yml` and
-`workflow-lint.yml` need only `contents: read`; `test.yml`, `pr-build.yml` and `mutation.yml`
+The caller's `permissions:` caps what the called jobs get. `changelog.yml`,
+`workflow-lint.yml` and `plogon-build.yml` need only `contents: read`; `test.yml`, `pr-build.yml` and `mutation.yml`
 also need `packages: read` (see below), or the run fails to start. `mutation.yml` also needs
 `actions: read`: its `kill-report` reads the revert-check artifact from the caller's Tests run. A workflow that builds the plugin itself (a release, say) can use the action
 directly after checking out:

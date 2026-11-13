@@ -43,7 +43,7 @@ jobs:
     # After changing the action, bump this SHA in a later commit; the self-pins job in ci.yml
     # fails until the pin matches the action.
     - name: Install Dalamud
-      uses: Cellar-Mander/buildingway-ci/.github/actions/install-dalamud@a5e4eb37a0fdeff14f16ac4fde4de475e0ff2666
+      uses: Cellar-Mander/buildingway-ci/.github/actions/install-dalamud@364a27d5f22ca8377b2b33cde139de67ed45189c
 
     # Loading a project that uses the Buildingway.Build SDK reads the caller's "buildingway" feed
     - name: Check formatting

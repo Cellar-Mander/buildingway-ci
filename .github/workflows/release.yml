@@ -154,7 +154,7 @@ jobs:
     # A reusable workflow can't name its own commit, so this pins an earlier commit of this repo;
     # the self-pins job in ci.yml fails until the pin matches the action.
     - name: Install Dalamud
-      uses: Cellar-Mander/buildingway-ci/.github/actions/install-dalamud@a5e4eb37a0fdeff14f16ac4fde4de475e0ff2666
+      uses: Cellar-Mander/buildingway-ci/.github/actions/install-dalamud@364a27d5f22ca8377b2b33cde139de67ed45189c
 
     # The notes are the tag's CHANGELOG section for the version, so they say what users read in
     # the changelog. A testing build also has the Unreleased entries merged since <Version> was
