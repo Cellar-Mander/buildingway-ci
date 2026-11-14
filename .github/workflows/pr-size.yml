@@ -1,0 +1,65 @@
+name: PR size
+
+# Fails a pull request that changes more than max-lines lines (added plus deleted, from git diff
+# --numstat against the merge base; binary files count 0 and a rename only its edits), leaving out
+# generated lockfiles. Beyond that a PR is too big to review on its own: split it. Require
+# "<job> / size" so it blocks merging. There is no override label: the limit is strict. On other
+# events (the release's workflow_dispatch on its repo.json branch) there is no PR to measure, so
+# it passes.
+# The caller needs no path filter: a required check that a filter skips never reports.
+on:
+  workflow_call:
+    inputs:
+      max-lines:
+        description: Most changed lines a PR may have
+        required: false
+        type: number
+        default: 2000
+      exclude:
+        description: Space-separated git glob pathspecs left out of the count
+        required: false
+        type: string
+        default: >-
+          **/packages.lock.json **/package-lock.json **/yarn.lock **/pnpm-lock.yaml
+
+permissions:
+  contents: read
+
+jobs:
+
+  size:
+    name: size
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      if: ${{ github.event_name == 'pull_request' }}
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+        fetch-depth: 0
+
+    - name: Check size
+      env:
+        EVENT: ${{ github.event_name }}
+        BASE: ${{ github.event.pull_request.base.sha }}
+        HEAD: ${{ github.event.pull_request.head.sha }}
+        MAX_LINES: ${{ inputs.max-lines }}
+        EXCLUDE: ${{ inputs.exclude }}
+      run: |
+        if [ "$EVENT" != pull_request ]; then
+          echo "::notice::No pull request on a $EVENT run; nothing to measure"
+          exit 0
+        fi
+        read -ra patterns <<<"$EXCLUDE"
+        pathspecs=(.)
+        for p in "${patterns[@]}"; do
+          pathspecs+=(":(glob,exclude)$p")
+        done
+        lines=$(git diff --numstat "$BASE...$HEAD" -- "${pathspecs[@]}" |
+          awk '$1 != "-" { n += $1 + $2 } END { print n + 0 }')
+        echo "$lines changed lines (limit $MAX_LINES)" | tee -a "$GITHUB_STEP_SUMMARY"
+        if [ "$lines" -gt "$MAX_LINES" ]; then
+          echo "::error::This PR changes $lines lines, over the $MAX_LINES-line limit. Split it into PRs that can each be reviewed on their own."
+          exit 1
+        fi

@@ -9,6 +9,7 @@ thin caller workflows, and the composite action they use to install a pinned Dal
 | `pr-build.yml` | `build`: format check, Release build, plugin artifact | `plugin` (required), `dotnet-version` |
 | `workflow-lint.yml` | `actionlint`, `zizmor` | none |
 | `release.yml` | `tag`, `build`, `publish`: tag main's `<Version>`, build, GitHub release, repo.json PR | `plugin` (required), `channel`, `checks`, `dotnet-version` |
+| `pr-size.yml` | `size` on pull requests: fails a PR over `max-lines` changed lines, lockfiles left out (require it; no override label); passes on other events | `max-lines` (default 2000), `exclude` |
 | `changelog.yml` | `changelog` on pull requests: fails when plugin code changed but the changelog didn't (informs only; skipped for the `no-changelog` label and Dependabot) | `paths` (required), `changelog` (default `CHANGELOG.md`) |
 | `mutation.yml` | `mutation`: Stryker.NET with one test runner per core unless `stryker-config.json` sets `concurrency`; pull requests test only changed code unless labelled `mutation`. `kill-report` on pull requests: which new and changed tests kill mutants on the changed lines, joined with `test.yml`'s revert-check (both inform only) | `test-project` (required), `buildingway-project`, `dotnet-version` |
 | `plogon-build.yml` | `plogon-build`: the plugin built offline the way Plogon builds it for D17, from nuget.org packages only (what it copies from Plogon is in its comments) | `project-dir` (required), `sdk-version`, `force-packages` |
@@ -42,7 +43,7 @@ jobs:
 ```
 
 The caller's `permissions:` caps what the called jobs get. `changelog.yml`,
-`workflow-lint.yml` and `plogon-build.yml` need only `contents: read`; `test.yml`, `pr-build.yml` and `mutation.yml`
+`pr-size.yml`, `workflow-lint.yml` and `plogon-build.yml` need only `contents: read`; `test.yml`, `pr-build.yml` and `mutation.yml`
 also need `packages: read` (see below), or the run fails to start. `mutation.yml` also needs
 `actions: read`: its `kill-report` reads the revert-check artifact from the caller's Tests run. A workflow that builds the plugin itself (a release, say) can use the action
 directly after checking out:
@@ -124,7 +125,8 @@ released), `.github/dalamud.env` for install-dalamud, and in Settings → Action
 `checks` lists the workflow files of every required check (default
 `test.yml workflow-lint.yml pr-build.yml`). Pushes and PRs made with `github.token` start no
 workflows, so the release dispatches these on the repo.json branch; a required check missing
-from the list never reports and blocks the PR, so each needs `workflow_dispatch` too.
+from the list never reports and blocks the PR, so each needs `workflow_dispatch` too. A caller of
+`pr-size.yml` adds its workflow to `checks`; it passes on a dispatch, as there is no PR to measure.
 
 What each step guards against is in the comments in `release.yml`.
 
