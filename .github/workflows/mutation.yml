@@ -3,7 +3,8 @@ name: Mutation
 # Would the tests catch plausible faults? Stryker.NET mutates the code under test and reruns the
 # tests. Informs only: no score threshold, and keep "<job> / mutation" out of required checks.
 # Stryker must be a local tool in the caller's tool manifest (.config/dotnet-tools.json), with its settings
-# in the test project's stryker-config.json. On pull requests only mutants in code or tests changed against
+# in the test project's stryker-config.json. Stryker runs one test runner per core unless that file
+# sets concurrency. On pull requests only mutants in code or tests changed against
 # the base branch are tested; a PR labelled mutation gets a full run instead, e.g. when tests were
 # deleted. Other events (schedule, workflow_dispatch) always get a full run. The caller triggers on
 # pull_request with types opened, synchronize, reopened and labeled; other labels start no run.
@@ -82,10 +83,16 @@ jobs:
           && format('--since:origin/{0}', github.base_ref) || '' }}
         NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       # Without --disable-bail Stryker stops each mutant's run at its first failing test and names only
-      # that one; a full run keeps bailing, as it tests every mutant and no kill report reads it
+      # that one; a full run keeps bailing, as it tests every mutant and no kill report reads it.
+      # One test runner per core (Stryker's default is half the cores): the runner is disposable,
+      # and per-mutant overhead, not the tests, dominates. A concurrency in stryker-config.json wins.
       run: |
         echo "all-killers=${SINCE:+true}" >> "$GITHUB_OUTPUT"
-        dotnet stryker ${SINCE:+"$SINCE" --disable-bail} --output "$RUNNER_TEMP/stryker"
+        concurrency=()
+        if ! jq -e '."stryker-config".concurrency // empty' stryker-config.json > /dev/null 2>&1; then
+          concurrency=(--concurrency "$(nproc)")
+        fi
+        dotnet stryker ${SINCE:+"$SINCE" --disable-bail} "${concurrency[@]}" --output "$RUNNER_TEMP/stryker"
 
     - name: Summary
       if: always()

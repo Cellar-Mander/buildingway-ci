@@ -10,7 +10,7 @@ thin caller workflows, and the composite action they use to install a pinned Dal
 | `workflow-lint.yml` | `actionlint`, `zizmor` | none |
 | `release.yml` | `tag`, `build`, `publish`: tag main's `<Version>`, build, GitHub release, repo.json PR | `plugin` (required), `channel`, `checks`, `dotnet-version` |
 | `changelog.yml` | `changelog` on pull requests: fails when plugin code changed but the changelog didn't (informs only; skipped for the `no-changelog` label and Dependabot) | `paths` (required), `changelog` (default `CHANGELOG.md`) |
-| `mutation.yml` | `mutation`: Stryker.NET; pull requests test only changed code unless labelled `mutation`. `kill-report` on pull requests: which new and changed tests kill mutants on the changed lines, joined with `test.yml`'s revert-check (both inform only) | `test-project` (required), `buildingway-project`, `dotnet-version` |
+| `mutation.yml` | `mutation`: Stryker.NET with one test runner per core unless `stryker-config.json` sets `concurrency`; pull requests test only changed code unless labelled `mutation`. `kill-report` on pull requests: which new and changed tests kill mutants on the changed lines, joined with `test.yml`'s revert-check (both inform only) | `test-project` (required), `buildingway-project`, `dotnet-version` |
 | `plogon-build.yml` | `plogon-build`: the plugin built offline the way Plogon builds it for D17, from nuget.org packages only (what it copies from Plogon is in its comments) | `project-dir` (required), `sdk-version`, `force-packages` |
 
 | Action | Does |
