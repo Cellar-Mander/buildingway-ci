@@ -11,7 +11,7 @@ thin caller workflows, and the composite action they use to install a pinned Dal
 | `release.yml` | `tag`, `build`, `publish`: tag main's `<Version>`, build, GitHub release, repo.json PR | `plugin` (required), `channel`, `checks`, `dotnet-version` |
 | `pr-size.yml` | `size` on pull requests: fails a PR over `max-lines` changed lines, lockfiles left out (require it; no override label); passes on other events | `max-lines` (default 2000), `exclude` |
 | `changelog.yml` | `changelog` on pull requests: fails when plugin code changed but the changelog didn't (informs only; skipped for the `no-changelog` label and Dependabot) | `paths` (required), `changelog` (default `CHANGELOG.md`) |
-| `mutation.yml` | `mutation`: Stryker.NET with one test runner per core unless `stryker-config.json` sets `concurrency`; pull requests test only changed code unless labelled `mutation`. `kill-report` on pull requests: which new and changed tests kill mutants on the changed lines, joined with `test.yml`'s revert-check (both inform only) | `test-project` (required), `buildingway-project`, `dotnet-version` |
+| `mutation.yml` | `mutation`: Stryker.NET with one test runner per core unless `stryker-config.json` sets `concurrency`; pull requests test only changed code unless labelled `mutation`. `kill-report` on pull requests: which new and changed tests kill mutants on the changed lines, joined with `test.yml`'s revert-check (both inform only) | `test-project` (required), `buildingway-project`, `kill-report` (default true), `dotnet-version` |
 | `plogon-build.yml` | `plogon-build`: the plugin built offline the way Plogon builds it for D17, from nuget.org packages only (what it copies from Plogon is in its comments) | `project-dir` (required), `sdk-version`, `force-packages` |
 
 | Action | Does |
@@ -60,7 +60,7 @@ mutation runs on demand, and a path filter naming the code under test.
 `test.yml`'s `revert-check` runs `dotnet buildingway revert-check`, so the caller's
 `.config/dotnet-tools.json` must list `Buildingway.Tools`
 ([buildingway-tools](https://github.com/Cellar-Mander/buildingway-tools)); set
-`revert-check: false` if it doesn't.
+`revert-check: false` if it doesn't, and pass `kill-report: false` to `mutation.yml` too.
 
 `mutation.yml`'s `kill-report` joins the mutation report with the revert-check verdicts that
 `test.yml` uploads for the same commit (`dotnet buildingway mutant-triage tests`), waiting up to 20
@@ -69,7 +69,10 @@ passed revert-check job with no verdicts had nothing to prove, and the kill repo
 `revert-check --json` and `mutant-triage tests`) and the `json` reporter in `stryker-config.json`.
 It runs only on changed-code runs, where Stryker runs every test against each mutant
 (`--disable-bail`) so the report names all its killers; it says why and passes when either report
-is missing.
+is missing. That costs about a fifth more Stryker time, so Stryker keeps bailing, and the kill
+report says why it skipped, when it can have nothing to join: the PR changes no test files or only
+test files (split as revert-check splits them, including `revert_tests=` in `.claude/checks`), or
+the caller passes `kill-report: false`.
 `Buildingway.Tools` itself can't list itself in its tool manifest, so it passes
 `buildingway-project: Buildingway.Tools` and `kill-report` runs the tool the PR builds instead.
 

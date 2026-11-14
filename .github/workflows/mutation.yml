@@ -15,6 +15,10 @@ name: Mutation
 # reads the revert-check artifact from the caller's Tests run for the same commit, waiting only while
 # a revert-check job for that commit is still going, so the caller must grant actions: read, and its
 # Buildingway.Tools must be 0.2.0 or later. It never starts a mutation run of its own, and passes when either report is missing.
+# --disable-bail costs about a fifth more Stryker time, so a changed-code run keeps bailing when
+# kill-report is sure to have nothing to join: the PR changes no test files or only test files (as
+# revert-check splits them), or the caller sets kill-report: false, which it should whenever
+# test.yml's revert-check is off.
 # Buildingway.Tools can't list itself in its own tool manifest, so it sets buildingway-project and
 # kill-report runs the tool the PR builds.
 on:
@@ -31,6 +35,13 @@ on:
         required: false
         type: string
         default: ''
+      kill-report:
+        description: >-
+          Whether to join pull request runs with test.yml's revert-check verdicts; set false when
+          revert-check is off, so Stryker keeps stopping each mutant at its first killing test
+        required: false
+        type: boolean
+        default: true
       dotnet-version:
         description: .NET SDK version for actions/setup-dotnet
         required: false
@@ -50,8 +61,9 @@ jobs:
       contents: read
       packages: read  # Buildingway.Tools and Buildingway.Build from GitHub Packages
     outputs:
-      # Whether the report names every killing test (a changed-code run), as kill-report needs
-      all-killers: ${{ steps.stryker.outputs.all-killers }}
+      # Whether the report names every killing test, as kill-report needs, and if not, why not
+      all-killers: ${{ steps.plan.outputs.all-killers }}
+      no-kill-report: ${{ steps.plan.outputs.no-kill-report }}
 
     steps:
     - name: Checkout
@@ -73,26 +85,77 @@ jobs:
         NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: dotnet tool restore
 
+    # Without --disable-bail Stryker stops each mutant's run at its first failing test and names only
+    # that one. Only a changed-code run that kill-report can use pays for naming them all. A file is
+    # a test when it matches a revert_tests= glob in .claude/checks, or, with none set, revert-check's
+    # TEST_PATH pattern; .claude/ and .github/ are never product. Deleted tests have nothing to prove.
+    # Keep this in step with Buildingway.Tools/Scripts/revert-check.
+    - name: Plan kill report
+      id: plan
+      env:
+        SINCE: >-
+          ${{ github.event_name == 'pull_request'
+          && !contains(github.event.pull_request.labels.*.name, 'mutation')
+          && format('origin/{0}', github.base_ref) || '' }}
+        KILL_REPORT: ${{ inputs.kill-report }}
+      run: |
+        set -f  # revert_tests globs are patterns, not paths to expand
+        why=
+        if [ -z "$SINCE" ]; then
+          why="this was a full mutation run, which names only the first killing test of each mutant."
+        elif [ "$KILL_REPORT" != true ]; then
+          why="the caller set kill-report: false (revert-check is off), so Stryker kept its bail."
+        else
+          globs=$(git show HEAD:.claude/checks 2>/dev/null |
+            sed -n 's/^[[:space:]]*revert_tests[[:space:]]*=//p' | head -n 1)
+          test_path='(^|/)(tests?|__tests__)/|(^|/)test_[^/]*$|_test\.[^/]*$|\.(test|spec)\.[^/]*$|Tests?\.[^/]*$|Tests?/'
+          tests=0 product=0
+          while IFS=$'\t' read -r status path; do
+            is_test=false
+            if [ -n "$globs" ]; then
+              for g in $globs; do
+                # shellcheck disable=SC2254  # $g is a glob, as revert-check's fnmatch
+                case $path in $g) is_test=true; break ;; esac
+              done
+            elif [[ $path =~ $test_path ]]; then
+              is_test=true
+            fi
+            if $is_test; then
+              [ "$status" = D ] || tests=$((tests + 1))
+            elif [[ $path != .claude/* && $path != .github/* ]]; then
+              product=$((product + 1))
+            fi
+          done < <(git diff --name-status --no-renames "$SINCE...HEAD")
+          if [ "$tests" = 0 ]; then
+            why="the PR adds or changes no test files, so revert-check has nothing to prove and Stryker kept its bail."
+          elif [ "$product" = 0 ]; then
+            why="the PR changes only tests, so revert-check has no product change to revert and Stryker kept its bail."
+          fi
+        fi
+        if [ -n "$why" ]; then all_killers=false; else all_killers=true; fi
+        echo "all-killers=$all_killers" >> "$GITHUB_OUTPUT"
+        echo "no-kill-report=$why" >> "$GITHUB_OUTPUT"
+        echo "${why:-Stryker names every killing test for kill-report.}"
+
     - name: Mutation test
-      id: stryker
       working-directory: ${{ inputs.test-project }}
       env:
         SINCE: >-
           ${{ github.event_name == 'pull_request'
           && !contains(github.event.pull_request.labels.*.name, 'mutation')
           && format('--since:origin/{0}', github.base_ref) || '' }}
+        ALL_KILLERS: ${{ steps.plan.outputs.all-killers }}
         NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
-      # Without --disable-bail Stryker stops each mutant's run at its first failing test and names only
-      # that one; a full run keeps bailing, as it tests every mutant and no kill report reads it.
       # One test runner per core (Stryker's default is half the cores): the runner is disposable,
       # and per-mutant overhead, not the tests, dominates. A concurrency in stryker-config.json wins.
       run: |
-        echo "all-killers=${SINCE:+true}" >> "$GITHUB_OUTPUT"
+        bail=()
+        [ "$ALL_KILLERS" = true ] && bail=(--disable-bail)
         concurrency=()
         if ! jq -e '."stryker-config".concurrency // empty' stryker-config.json > /dev/null 2>&1; then
           concurrency=(--concurrency "$(nproc)")
         fi
-        dotnet stryker ${SINCE:+"$SINCE" --disable-bail} "${concurrency[@]}" --output "$RUNNER_TEMP/stryker"
+        dotnet stryker ${SINCE:+"$SINCE"} "${bail[@]}" "${concurrency[@]}" --output "$RUNNER_TEMP/stryker"
 
     - name: Summary
       if: always()
@@ -118,7 +181,17 @@ jobs:
       actions: read   # finds and downloads the Tests run's revert-check artifact
 
     steps:
+    # Says why, and skips the rest, when the mutation job planned no report
+    - name: No kill report
+      if: needs.mutation.outputs.all-killers != 'true'
+      env:
+        WHY: ${{ needs.mutation.outputs.no-kill-report || 'the mutation job stopped before planning one.' }}
+      run: |
+        echo "No kill report: $WHY"
+        { echo '## Kill report'; echo; echo "No kill report: $WHY"; } >> "$GITHUB_STEP_SUMMARY"
+
     - name: Checkout
+      if: needs.mutation.outputs.all-killers == 'true'
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
@@ -126,16 +199,19 @@ jobs:
         fetch-depth: 0
 
     - name: Install .NET
+      if: needs.mutation.outputs.all-killers == 'true'
       uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
       with:
         dotnet-version: ${{ inputs.dotnet-version }}
 
     - name: Restore tools
+      if: needs.mutation.outputs.all-killers == 'true'
       env:
         NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: dotnet tool restore
 
     - name: Download mutation report
+      if: needs.mutation.outputs.all-killers == 'true'
       continue-on-error: true  # a failed or cancelled run may have uploaded nothing
       uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with:
@@ -149,6 +225,7 @@ jobs:
     # writes no verdicts when it stops early with nothing to prove, so a passed revert-check job
     # with no artifact means that, not a missing report.
     - name: Download revert-check verdicts
+      if: needs.mutation.outputs.all-killers == 'true'
       id: verdicts
       env:
         GH_TOKEN: ${{ github.token }}
@@ -196,9 +273,9 @@ jobs:
 
     # bash -eo pipefail: a mutant-triage that can't run fails the job instead of writing an empty report
     - name: Kill report
+      if: needs.mutation.outputs.all-killers == 'true'
       shell: bash
       env:
-        ALL_KILLERS: ${{ needs.mutation.outputs.all-killers }}
         NOTHING_TO_PROVE: ${{ steps.verdicts.outputs.nothing }}
         BUILDINGWAY_PROJECT: ${{ inputs.buildingway-project }}
         NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
@@ -211,8 +288,6 @@ jobs:
           msg="No kill report: revert-check found nothing to prove (no changed test functions, no product changes, or the tests fail at HEAD; see its log)."
         elif [ ! -f "$rc" ]; then
           msg="No kill report: no revert-check verdicts for this commit (revert-check off, or its run failed before writing them)."
-        elif [ "$ALL_KILLERS" != true ]; then
-          msg="No kill report: this was a full mutation run, which names only the first killing test of each mutant."
         fi
         if [ -n "${msg-}" ]; then
           echo "$msg"
