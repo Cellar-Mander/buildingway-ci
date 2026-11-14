@@ -11,9 +11,9 @@ name: Mutation
 # On those changed-code runs Stryker runs every test against each mutant (--disable-bail), so the
 # report names every test that kills it, and kill-report joins it with test.yml's revert-check
 # verdicts: which of the PR's new and changed tests kill mutants on its changed lines. kill-report
-# reads the revert-check artifact from the caller's Tests run for the same commit, waiting for that
-# run if it is still going, so the caller must grant actions: read, and its Buildingway.Tools must be
-# 0.2.0 or later. It never starts a mutation run of its own, and passes when either report is missing.
+# reads the revert-check artifact from the caller's Tests run for the same commit, waiting only while
+# a revert-check job for that commit is still going, so the caller must grant actions: read, and its
+# Buildingway.Tools must be 0.2.0 or later. It never starts a mutation run of its own, and passes when either report is missing.
 # Buildingway.Tools can't list itself in its own tool manifest, so it sets buildingway-project and
 # kill-report runs the tool the PR builds.
 on:
@@ -136,19 +136,29 @@ jobs:
         path: reports/mutation
 
     # The newest revert-check artifact from a run for the PR's head commit. Until one exists, wait
-    # while any other run for that commit is unfinished; checking for unfinished runs before
-    # looking for the artifact means a run that finished in between can't be missed.
+    # while a revert-check job for that commit is unfinished, or a run for it lists no jobs yet (it
+    # may hold one); other jobs and workflows don't hold it up. Checking jobs before looking for the
+    # artifact means a job that uploaded and finished in between can't be missed. revert-check
+    # writes no verdicts when it stops early with nothing to prove, so a passed revert-check job
+    # with no artifact means that, not a missing report.
     - name: Download revert-check verdicts
+      id: verdicts
       env:
         GH_TOKEN: ${{ github.token }}
         REPO: ${{ github.repository }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         RUN_ID: ${{ github.run_id }}
       run: |
+        rc_jobs='.jobs[] | select(.name | test("(^| / )revert-check$"))'
         deadline=$((SECONDS + 20 * 60))
         while :; do
-          busy=$(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&per_page=100" \
-            --jq "[.workflow_runs[] | select(.id != $RUN_ID and .status != \"completed\")] | length")
+          busy=0
+          for id in $(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&per_page=100" \
+              --jq ".workflow_runs[] | select(.id != $RUN_ID and .status != \"completed\") | .id"); do
+            n=$(gh api "repos/$REPO/actions/runs/$id/jobs?per_page=100" \
+              --jq "if .total_count == 0 then 1 else [$rc_jobs | select(.status != \"completed\")] | length end")
+            busy=$((busy + n))
+          done
           run=$(gh api "repos/$REPO/actions/artifacts?name=revert-check&per_page=100" \
             --jq "[.artifacts[] | select(.workflow_run.head_sha == \"$HEAD_SHA\" and (.expired | not))]
                   | max_by(.created_at) | .workflow_run.id // empty")
@@ -158,11 +168,20 @@ jobs:
             break
           fi
           if [ "$busy" = 0 ]; then
-            echo "No run for $HEAD_SHA uploaded revert-check verdicts."
+            passed=$(gh api "repos/$REPO/actions/runs?head_sha=$HEAD_SHA&status=completed&per_page=100" --jq '.workflow_runs[].id' |
+              while read -r id; do
+                gh api "repos/$REPO/actions/runs/$id/jobs?per_page=100" --jq "$rc_jobs | select(.conclusion == \"success\") | .id"
+              done)
+            if [ -n "$passed" ]; then
+              echo "nothing=true" >> "$GITHUB_OUTPUT"
+              echo "revert-check passed for $HEAD_SHA without verdicts: nothing to prove."
+            else
+              echo "No run for $HEAD_SHA uploaded revert-check verdicts."
+            fi
             break
           fi
           if [ "$SECONDS" -ge "$deadline" ]; then
-            echo "Gave up after 20 minutes: $busy run(s) for $HEAD_SHA still going, none with revert-check verdicts yet."
+            echo "Gave up after 20 minutes: $busy revert-check job(s) for $HEAD_SHA still going, none with verdicts yet."
             break
           fi
           sleep 30
@@ -173,6 +192,7 @@ jobs:
       shell: bash
       env:
         ALL_KILLERS: ${{ needs.mutation.outputs.all-killers }}
+        NOTHING_TO_PROVE: ${{ steps.verdicts.outputs.nothing }}
         BUILDINGWAY_PROJECT: ${{ inputs.buildingway-project }}
         NuGetPackageSourceCredentials_buildingway: Username=token;Password=${{ github.token }}
       run: |
@@ -180,6 +200,8 @@ jobs:
         report=reports/mutation/mutation-report.json
         if [ ! -f "$report" ]; then
           msg="No kill report: no mutation report (the run failed, or stryker-config.json lacks the json reporter)."
+        elif [ ! -f "$rc" ] && [ "$NOTHING_TO_PROVE" = true ]; then
+          msg="No kill report: revert-check found nothing to prove (no changed test functions, no product changes, or the tests fail at HEAD; see its log)."
         elif [ ! -f "$rc" ]; then
           msg="No kill report: no revert-check verdicts for this commit (revert-check off, or its run failed before writing them)."
         elif [ "$ALL_KILLERS" != true ]; then

@@ -63,7 +63,8 @@ mutation runs, and a path filter naming the code under test.
 
 `mutation.yml`'s `kill-report` joins the mutation report with the revert-check verdicts that
 `test.yml` uploads for the same commit (`dotnet buildingway mutant-triage tests`), waiting up to 20
-minutes for the Tests run to finish. It needs `Buildingway.Tools` 0.2.0 or later (for
+minutes while a revert-check job for that commit is unfinished (no other jobs or workflows). A
+passed revert-check job with no verdicts had nothing to prove, and the kill report says so. It needs `Buildingway.Tools` 0.2.0 or later (for
 `revert-check --json` and `mutant-triage tests`) and the `json` reporter in `stryker-config.json`.
 It runs only on changed-code runs, where Stryker runs every test against each mutant
 (`--disable-bail`) so the report names all its killers; it says why and passes when either report
