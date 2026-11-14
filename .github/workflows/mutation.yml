@@ -172,7 +172,7 @@ jobs:
   kill-report:
     name: kill-report
     needs: mutation
-    if: always() && github.event_name == 'pull_request' && needs.mutation.result != 'skipped'
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.mutation.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
