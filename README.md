@@ -53,8 +53,8 @@ directly after checking out:
 
 `changelog.yml` and `mutation.yml` read the caller's pull request labels, so the caller must
 trigger on the label events (`labeled`, plus `unlabeled` for the changelog) and the repo needs the
-`no-changelog` and `mutation` labels. Keep the caller's own triggers: a schedule for nightly
-mutation runs, and a path filter naming the code under test.
+`no-changelog` and `mutation` labels. Keep the caller's own triggers: `workflow_dispatch` for full
+mutation runs on demand, and a path filter naming the code under test.
 
 `test.yml`'s `revert-check` runs `dotnet buildingway revert-check`, so the caller's
 `.config/dotnet-tools.json` must list `Buildingway.Tools`
