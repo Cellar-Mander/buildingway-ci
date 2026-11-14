@@ -6,7 +6,7 @@ name: Mutation
 # in the test project's stryker-config.json. Stryker runs one test runner per core unless that file
 # sets concurrency. On pull requests only mutants in code or tests changed against
 # the base branch are tested; a PR labelled mutation gets a full run instead, e.g. when tests were
-# deleted. Other events (schedule, workflow_dispatch) always get a full run. The caller triggers on
+# deleted. Other events (e.g. workflow_dispatch) always get a full run. The caller triggers on
 # pull_request with types opened, synchronize, reopened and labeled; other labels start no run.
 #
 # On those changed-code runs Stryker runs every test against each mutant (--disable-bail), so the
