@@ -276,12 +276,26 @@ jobs:
     # repo.json (pluginmaster format) is what /xlsettings fetches from the raw main URL. Dalamud
     # offers the Testing* fields only to installs that receive testing versions, and only while
     # TestingAssemblyVersion is above AssemblyVersion and TestingDalamudApiLevel is the game's.
-    # A testing build sets just those on main's entry; a stable release rebuilds the entry from
-    # its manifest, which has none, so it also ends any testing build.
+    # A testing build sets just those on main's entry, or, before the first stable release, creates
+    # repo.json with a testing-only entry. A stable release rebuilds the entry from its manifest,
+    # which has none, so it also ends any testing build.
     - name: Update repo.json
       run: |
         url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$PLUGIN.zip"
-        if [[ $CHANNEL == testing ]]; then
+        if [[ $CHANNEL == testing && ! -f repo.json ]]; then
+          # No stable release yet: an entry only installs that get testing builds see, installed from
+          # DownloadLinkTesting. It has no stable links, so the stable release still replaces it.
+          jq --arg url "$url" --argjson now "$(date +%s)" '[del(.DownloadLinkInstall, .DownloadLinkUpdate) + {
+              TestingAssemblyVersion: .AssemblyVersion,
+              TestingDalamudApiLevel: .DalamudApiLevel,
+              TestingChangelog: (.Changelog // ""),
+              DownloadLinkTesting: $url,
+              IsHide: false,
+              IsTestingExclusive: true,
+              LastUpdate: $now
+            }]' "release/$PLUGIN.json" > repo.json
+          body="Merge to offer $TAG, the first build, to /xlsettings installs that receive testing versions. This creates repo.json with a testing-only entry (IsTestingExclusive); check TestingAssemblyVersion and DownloadLinkTesting first."
+        elif [[ $CHANNEL == testing ]]; then
           jq --arg url "$url" --argjson now "$(date +%s)" --slurpfile m "release/$PLUGIN.json" '.[0] += {
               TestingAssemblyVersion: $m[0].AssemblyVersion,
               TestingDalamudApiLevel: $m[0].DalamudApiLevel,

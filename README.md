@@ -121,9 +121,8 @@ jobs:
 ```
 
 The project needs `<plugin>/<plugin>.csproj` with `<Version>`, a Keep a Changelog `CHANGELOG.md`
-with `## Unreleased` and `## <version>` sections, `repo.json` on main (a one-entry array once
-released), `.github/dalamud.env` for install-dalamud, and in Settings → Actions → General
-"Allow GitHub Actions to create and approve pull requests".
+with `## Unreleased` and `## <version>` sections, `.github/dalamud.env` for install-dalamud, and
+in Settings → Actions → General "Allow GitHub Actions to create and approve pull requests".
 
 `checks` lists the workflow files of every required check (default
 `test.yml workflow-lint.yml pr-build.yml`). Pushes and PRs made with `github.token` start no
