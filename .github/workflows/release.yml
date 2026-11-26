@@ -285,7 +285,9 @@ jobs:
         if [[ $CHANNEL == testing && ! -f repo.json ]]; then
           # No stable release yet: an entry only installs that get testing builds see, installed from
           # DownloadLinkTesting. It has no stable links, so the stable release still replaces it.
-          jq --arg url "$url" --argjson now "$(date +%s)" '[del(.DownloadLinkInstall, .DownloadLinkUpdate) + {
+          # The manifest's IconUrl names v<Version>, which has no tag until the stable release, so
+          # it is pointed at this build's tag.
+          jq --arg url "$url" --arg base "${TAG%%-*}" --arg tag "$TAG" --argjson now "$(date +%s)" '[del(.DownloadLinkInstall, .DownloadLinkUpdate) + {
               TestingAssemblyVersion: .AssemblyVersion,
               TestingDalamudApiLevel: .DalamudApiLevel,
               TestingChangelog: (.Changelog // ""),
@@ -293,7 +295,7 @@ jobs:
               IsHide: false,
               IsTestingExclusive: true,
               LastUpdate: $now
-            }]' "release/$PLUGIN.json" > repo.json
+            } | if .IconUrl then .IconUrl |= (split("/\($base)/") | join("/\($tag)/")) else . end]' "release/$PLUGIN.json" > repo.json
           body="Merge to offer $TAG, the first build, to /xlsettings installs that receive testing versions. This creates repo.json with a testing-only entry (IsTestingExclusive); check TestingAssemblyVersion and DownloadLinkTesting first."
         elif [[ $CHANNEL == testing ]]; then
           jq --arg url "$url" --argjson now "$(date +%s)" --slurpfile m "release/$PLUGIN.json" '.[0] += {
